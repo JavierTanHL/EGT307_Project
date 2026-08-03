@@ -1,0 +1,50 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: services/web/Dockerfile
+    image: defect-web:1.0
+    container_name: defect-web
+    environment:
+      INFERENCE_URL: http://inference:8001
+      STORAGE_URL: http://storage:8002
+    ports:
+      - "8080:8000"
+    depends_on:
+      - inference
+      - storage
+    restart: unless-stopped
+
+  inference:
+    build:
+      context: .
+      dockerfile: services/inference/Dockerfile
+    image: defect-inference:1.0
+    container_name: defect-inference
+    environment:
+      MODEL_PATH: /app/models/component_classifier.keras
+      IMAGE_SIZE: "224"
+      GOOD_THRESHOLD: "0.5"
+    volumes:
+      - ./models:/app/models:ro
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  storage:
+    build:
+      context: .
+      dockerfile: services/storage/Dockerfile
+    image: defect-storage:1.0
+    container_name: defect-storage
+    environment:
+      DATABASE_PATH: /data/inspections.db
+      IMAGE_DIRECTORY: /data/images
+    volumes:
+      - defect-data:/data
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+
+volumes:
+  defect-data:

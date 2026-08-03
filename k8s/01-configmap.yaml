@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: defect-config
+  namespace: defect-detection
+data:
+  INFERENCE_URL: http://inference-service:8001
+  STORAGE_URL: http://storage-service:8002
+  MODEL_PATH: /app/models/component_classifier.keras
+  IMAGE_SIZE: "224"
+  GOOD_THRESHOLD: "0.5"
+  DATABASE_PATH: /data/inspections.db
+  IMAGE_DIRECTORY: /data/images

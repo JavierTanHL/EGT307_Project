@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-deployment
+  namespace: defect-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: inference}
+  template:
+    metadata:
+      labels: {app: inference}
+    spec:
+      containers:
+        - name: inference
+          image: defect-inference:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+          env:
+            - name: MODEL_PATH
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: MODEL_PATH}
+            - name: IMAGE_SIZE
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: IMAGE_SIZE}
+            - name: GOOD_THRESHOLD
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: GOOD_THRESHOLD}
+          readinessProbe:
+            httpGet: {path: /ready, port: 8001}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: {path: /health, port: 8001}
+            initialDelaySeconds: 45
+          resources:
+            requests: {cpu: 300m, memory: 768Mi}
+            limits: {cpu: "1", memory: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-service
+  namespace: defect-detection
+spec:
+  selector: {app: inference}
+  ports:
+    - port: 8001
+      targetPort: 8001

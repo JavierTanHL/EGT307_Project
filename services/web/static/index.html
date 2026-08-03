@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Product Defect Inspection</title>
+  <style>
+    :root { font-family: Arial, sans-serif; color: #17232c; background: #eef3f6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header, main { max-width: 1100px; margin: auto; padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: start; }
+    h1 { margin: 0 0 8px; }
+    p { color: #647581; }
+    main { display: grid; grid-template-columns: 1.2fr .8fr; gap: 20px; }
+    .card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 8px 24px #17304418; }
+    .history { grid-column: 1 / -1; }
+    .camera { position: relative; background: #101820; border-radius: 12px; overflow: hidden; aspect-ratio: 4/3; }
+    video { width: 100%; height: 100%; object-fit: cover; }
+    .guide { position: absolute; width: 72%; aspect-ratio: 1; left: 50%; top: 50%; transform: translate(-50%,-50%); border: 3px solid white; box-shadow: 0 0 0 1000px #0004; }
+    .guide span { display: block; width: fit-content; margin: auto; padding: 6px 10px; background: #000b; color: white; }
+    button { margin: 12px 8px 0 0; padding: 10px 15px; border: 0; border-radius: 9px; background: #126c86; color: white; font-weight: bold; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .prediction { text-align: center; padding: 18px; border-radius: 12px; font-size: 2rem; font-weight: 900; }
+    .good { background: #dff5e8; color: #16854c; }
+    .bad { background: #fde5e5; color: #b62e31; }
+    .metrics { display: grid; gap: 8px; margin-top: 12px; }
+    .metrics div { border: 1px solid #dce4e8; border-radius: 9px; padding: 10px; }
+    #preview { width: 100%; max-height: 250px; object-fit: contain; margin-top: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #dce4e8; padding: 9px; text-align: left; }
+    .message { min-height: 22px; color: #657682; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; } .history { grid-column: auto; } }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>AI Product Defect Inspection</h1>
+    <p>Place one product inside the square and capture it.</p>
+  </div>
+  <strong id="health">Checking services…</strong>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Webcam</h2>
+    <div class="camera">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="guide"><span>Centre product here</span></div>
+      <canvas id="canvas" hidden></canvas>
+    </div>
+    <button id="start">Start Camera</button>
+    <button id="inspect" disabled>Capture & Inspect</button>
+    <button id="stop" disabled>Stop</button>
+    <p id="message" class="message"></p>
+  </section>
+
+  <section class="card">
+    <h2>Latest Result</h2>
+    <div id="empty">No inspection yet.</div>
+    <div id="result" hidden>
+      <div id="label" class="prediction"></div>
+      <div class="metrics">
+        <div>Confidence: <strong id="confidence"></strong></div>
+        <div>Good probability: <strong id="goodProbability"></strong></div>
+        <div>Bad probability: <strong id="badProbability"></strong></div>
+      </div>
+      <img id="preview" alt="Captured product">
+      <p id="saved" class="message"></p>
+    </div>
+  </section>
+
+  <section class="card history">
+    <h2>Stored Inspection History</h2>
+    <button id="refresh">Refresh</button>
+    <p id="stats"></p>
+    <table>
+      <thead><tr><th>Time</th><th>Result</th><th>Confidence</th><th>Image</th></tr></thead>
+      <tbody id="history"><tr><td colspan="4">Loading…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const startBtn = document.getElementById("start");
+const inspectBtn = document.getElementById("inspect");
+const stopBtn = document.getElementById("stop");
+let stream = null;
+
+const pct = value => `${(Number(value) * 100).toFixed(1)}%`;
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: {ideal: 1280}, height: {ideal: 720} },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    startBtn.disabled = true;
+    inspectBtn.disabled = false;
+    stopBtn.disabled = false;
+    message.textContent = "Camera ready.";
+  } catch (error) {
+    message.textContent = `Camera error: ${error.message}`;
+  }
+}
+
+function stopCamera() {
+  if (stream) stream.getTracks().forEach(track => track.stop());
+  stream = null;
+  video.srcObject = null;
+  startBtn.disabled = false;
+  inspectBtn.disabled = true;
+  stopBtn.disabled = true;
+}
+
+function capture() {
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+  const size = Math.floor(Math.min(width, height) * .72);
+  const x = Math.floor((width - size) / 2);
+  const y = Math.floor((height - size) / 2);
+  canvas.width = 700;
+  canvas.height = 700;
+  canvas.getContext("2d").drawImage(video, x, y, size, size, 0, 0, 700, 700);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Capture failed")), "image/jpeg", .92);
+  });
+}
+
+async function inspectFrame() {
+  inspectBtn.disabled = true;
+  inspectBtn.textContent = "Inspecting…";
+  try {
+    const blob = await capture();
+    preview.src = URL.createObjectURL(blob);
+    const form = new FormData();
+    form.append("file", blob, `capture-${Date.now()}.jpg`);
+    const response = await fetch("/api/inspect", { method: "POST", body: form });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "Inspection failed");
+
+    const prediction = payload.prediction;
+    label.textContent = prediction.prediction;
+    label.className = `prediction ${prediction.prediction === "BAD" ? "bad" : "good"}`;
+    confidence.textContent = pct(prediction.confidence);
+    goodProbability.textContent = pct(prediction.good_probability);
+    badProbability.textContent = pct(prediction.bad_probability);
+    empty.hidden = true;
+    result.hidden = false;
+    saved.textContent = payload.storage_saved
+      ? `Stored as inspection #${payload.storage_record.id}`
+      : `Prediction completed, but storage failed: ${payload.storage_error}`;
+    await loadData();
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    inspectBtn.disabled = !stream;
+    inspectBtn.textContent = "Capture & Inspect";
+  }
+}
+
+async function loadData() {
+  try {
+    const [historyResponse, statsResponse] = await Promise.all([
+      fetch("/api/history"), fetch("/api/stats")
+    ]);
+    const items = await historyResponse.json();
+    const summary = await statsResponse.json();
+
+    stats.textContent = `Total: ${summary.total} | Good: ${summary.good} | Bad: ${summary.bad} | Average confidence: ${pct(summary.average_confidence)}`;
+    history.innerHTML = items.length ? "" : '<tr><td colspan="4">No records yet.</td></tr>';
+
+    for (const item of items) {
+      const row = document.createElement("tr");
+      const link = item.image_available
+        ? `<a target="_blank" href="/api/inspections/${item.id}/image">View</a>`
+        : "—";
+      row.innerHTML = `<td>${new Date(item.created_at).toLocaleString()}</td><td>${item.prediction}</td><td>${pct(item.confidence)}</td><td>${link}</td>`;
+      history.appendChild(row);
+    }
+  } catch (error) {
+    history.innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`;
+  }
+}
+
+async function checkHealth() {
+  try {
+    const response = await fetch("/health");
+    const value = await response.json();
+    const modelReady = value.dependencies?.inference?.details?.model_loaded === true;
+    health.textContent = modelReady ? "Services ready" : "Model not loaded";
+  } catch {
+    health.textContent = "Services unavailable";
+  }
+}
+
+startBtn.onclick = startCamera;
+stopBtn.onclick = stopCamera;
+inspectBtn.onclick = inspectFrame;
+refresh.onclick = loadData;
+window.addEventListener("beforeunload", stopCamera);
+window.addEventListener("DOMContentLoaded", async () => {
+  await Promise.all([loadData(), checkHealth()]);
+});
+</script>
+</body>
+</html>

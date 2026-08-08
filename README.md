@@ -1,5 +1,5 @@
 # EGT307 Three-Microservice Defect Detection System
-
+Javier , Harsidh , Darrel , Azmi
 This project uses the trained `component_classifier.keras` model from your
 `component_classifier_fixed.ipynb` notebook.
 

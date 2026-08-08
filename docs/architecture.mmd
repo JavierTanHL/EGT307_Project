@@ -1,0 +1,10 @@
+flowchart LR
+    U[QC User] --> B[Browser Webcam]
+    B -->|Captured JPEG| W[1. Web and API Service]
+    W -->|POST /predict| I[2. Inference Service]
+    I -->|GOOD/BAD and confidence| W
+    W -->|POST /inspections| S[3. Storage Service]
+    S -->|Inspection ID and history| W
+    W --> U
+    I --> M[(component_classifier.keras)]
+    S --> D[(SQLite + saved images)]

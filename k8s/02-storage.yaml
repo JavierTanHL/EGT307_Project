@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: storage-pvc
+  namespace: defect-detection
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-deployment
+  namespace: defect-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: storage}
+  template:
+    metadata:
+      labels: {app: storage}
+    spec:
+      containers:
+        - name: storage
+          image: defect-storage:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8002
+          env:
+            - name: DATABASE_PATH
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: DATABASE_PATH}
+            - name: IMAGE_DIRECTORY
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: IMAGE_DIRECTORY}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: {path: /health, port: 8002}
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: 8002}
+            initialDelaySeconds: 15
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 300m, memory: 256Mi}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: storage-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage-service
+  namespace: defect-detection
+spec:
+  selector: {app: storage}
+  ports:
+    - port: 8002
+      targetPort: 8002

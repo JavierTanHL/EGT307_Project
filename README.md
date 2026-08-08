@@ -56,6 +56,8 @@ Web/API Service :8000
 Inference :8001       Storage :8002
 TensorFlow model      SQLite + images + feedback folders
 ```
+<img width="398" height="358" alt="Screenshot 2026-08-09 at 4 06 46 AM" src="https://github.com/user-attachments/assets/e028c352-e49b-4933-8261-e2c3a8e38bca" />
+
 
 The browser accesses the webcam through JavaScript. The Docker container does
 not directly access the webcam.

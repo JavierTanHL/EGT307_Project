@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: custom-dataset-pvc
+  namespace: defect-detection
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trainer-deployment
+  namespace: defect-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: trainer}
+  template:
+    metadata:
+      labels: {app: trainer}
+    spec:
+      containers:
+        - name: trainer
+          image: defect-trainer:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8003
+          env:
+            - name: DATA_DIR
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: DATA_DIR}
+            - name: MODELS_DIR
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: MODELS_DIR}
+            - name: INFERENCE_URL
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: INFERENCE_URL}
+          volumeMounts:
+            - name: models
+              mountPath: /app/models
+            - name: custom-dataset
+              mountPath: /app/custom_dataset
+          readinessProbe:
+            httpGet: {path: /health, port: 8003}
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8003}
+            initialDelaySeconds: 20
+          resources:
+            requests: {cpu: 300m, memory: 768Mi}
+            limits: {cpu: "1", memory: 2Gi}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+        - name: custom-dataset
+          persistentVolumeClaim:
+            claimName: custom-dataset-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trainer-service
+  namespace: defect-detection
+spec:
+  type: NodePort
+  selector: {app: trainer}
+  ports:
+    - port: 8003
+      targetPort: 8003
+      nodePort: 30081

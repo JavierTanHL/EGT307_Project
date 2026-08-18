@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Custom Model Trainer</title>
+  <style>
+    :root { font-family: Arial, sans-serif; color: #17232c; background: #eef3f6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header, main { max-width: 1100px; margin: auto; padding: 24px; }
+    h1 { margin: 0 0 8px; }
+    p { color: #647581; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 8px 24px #17304418; }
+    .full { grid-column: 1 / -1; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input[type=text] { width: 100%; padding: 9px; border: 1px solid #dce4e8; border-radius: 8px; margin-top: 4px; }
+    .drop { border: 2px dashed #b7c4cc; border-radius: 12px; padding: 18px; text-align: center; margin-top: 8px; cursor: pointer; }
+    .drop.good { background: #f3fbf6; }
+    .drop.bad { background: #fdf5f5; }
+    .counts { margin-top: 8px; color: #647581; }
+    button { margin: 12px 8px 0 0; padding: 10px 15px; border: 0; border-radius: 9px; background: #126c86; color: white; font-weight: bold; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    progress { width: 100%; height: 14px; margin-top: 12px; }
+    .message { min-height: 22px; color: #657682; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border-bottom: 1px solid #dce4e8; padding: 9px; text-align: left; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Custom Model Trainer</h1>
+  <p>Upload good and bad photos for any item, then train a classifier from them.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. Item &amp; Images</h2>
+    <label for="itemName">Item name</label>
+    <input type="text" id="itemName" placeholder="e.g. gasket">
+
+    <label>Good images</label>
+    <div class="drop good" id="goodDrop">Click or drop good images here</div>
+    <input type="file" id="goodInput" accept="image/*" multiple hidden>
+
+    <label>Bad images</label>
+    <div class="drop bad" id="badDrop">Click or drop bad images here</div>
+    <input type="file" id="badInput" accept="image/*" multiple hidden>
+
+    <p class="counts" id="counts">No images uploaded yet.</p>
+    <p id="uploadMessage" class="message"></p>
+  </section>
+
+  <section class="card">
+    <h2>2. Train</h2>
+    <p>Trains a MobileNetV2-based good/bad classifier on the images above. Needs a few images in each category to start.</p>
+    <button id="trainButton">Start Training</button>
+    <progress id="progress" max="40" value="0" hidden></progress>
+    <p id="trainMessage" class="message"></p>
+  </section>
+
+  <section class="card full">
+    <h2>Trained Models</h2>
+    <button id="refreshModels">Refresh</button>
+    <table>
+      <thead><tr><th>Model file</th><th></th></tr></thead>
+      <tbody id="modelsBody"><tr><td colspan="2">Loading…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const itemName = document.getElementById('itemName');
+const goodDrop = document.getElementById('goodDrop');
+const badDrop = document.getElementById('badDrop');
+const goodInput = document.getElementById('goodInput');
+const badInput = document.getElementById('badInput');
+const counts = document.getElementById('counts');
+const uploadMessage = document.getElementById('uploadMessage');
+const trainButton = document.getElementById('trainButton');
+const progress = document.getElementById('progress');
+const trainMessage = document.getElementById('trainMessage');
+const modelsBody = document.getElementById('modelsBody');
+
+goodDrop.onclick = () => goodInput.click();
+badDrop.onclick = () => badInput.click();
+goodInput.onchange = () => uploadFiles(goodInput.files, 'good');
+badInput.onchange = () => uploadFiles(badInput.files, 'bad');
+
+async function uploadFiles(files, category) {
+  const item = itemName.value.trim();
+  if (!item) { uploadMessage.textContent = 'Enter an item name first.'; return; }
+  uploadMessage.textContent = `Uploading ${files.length} ${category} image(s)…`;
+  for (const file of files) {
+    const form = new FormData();
+    form.append('item_name', item);
+    form.append('category', category);
+    form.append('file', file);
+    await fetch('/api/upload', { method: 'POST', body: form });
+  }
+  uploadMessage.textContent = 'Upload complete.';
+  refreshCounts();
+}
+
+async function refreshCounts() {
+  const item = itemName.value.trim();
+  if (!item) return;
+  const response = await fetch(`/api/dataset?item_name=${encodeURIComponent(item)}`);
+  const data = await response.json();
+  counts.textContent = `good: ${data.good}   bad: ${data.bad}`;
+}
+itemName.addEventListener('change', refreshCounts);
+
+trainButton.onclick = async () => {
+  const item = itemName.value.trim();
+  if (!item) { trainMessage.textContent = 'Enter an item name first.'; return; }
+  const form = new FormData();
+  form.append('item_name', item);
+  const response = await fetch('/api/train', { method: 'POST', body: form });
+  if (!response.ok) {
+    const err = await response.json();
+    trainMessage.textContent = err.detail || 'Could not start training.';
+    return;
+  }
+  progress.hidden = false;
+  trainButton.disabled = true;
+  trainMessage.textContent = 'Training started…';
+  pollStatus();
+};
+
+async function pollStatus() {
+  const response = await fetch('/api/train/status');
+  const status = await response.json();
+  progress.value = status.epoch;
+  if (status.state === 'running') {
+    trainMessage.textContent = `Epoch ${status.epoch}/${status.total_epochs}${status.val_accuracy ? ', val accuracy ' + status.val_accuracy : ''}`;
+    setTimeout(pollStatus, 3000);
+  } else if (status.state === 'done') {
+    trainMessage.textContent = status.reload_ok
+      ? `Done. Saved as ${status.item_name}_classifier.keras — inspection app updated, "${status.item_name}" is ready to use.`
+      : `Done. Saved as ${status.item_name}_classifier.keras — but could not notify the inspection app (${status.reload_error}). Restart it to pick up the new model.`;
+    trainButton.disabled = false;
+    refreshModels();
+  } else if (status.state === 'error') {
+    trainMessage.textContent = `Training failed: ${status.error}`;
+    trainButton.disabled = false;
+  }
+}
+
+async function refreshModels() {
+  const response = await fetch('/api/models');
+  const data = await response.json();
+  modelsBody.innerHTML = data.models.length
+    ? data.models.map(name => `<tr><td>${name}</td><td><a href="/api/models/${encodeURIComponent(name)}/download">Download</a></td></tr>`).join('')
+    : '<tr><td colspan="2">No trained models yet.</td></tr>';
+}
+document.getElementById('refreshModels').onclick = refreshModels;
+
+refreshModels();
+</script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+  namespace: defect-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+        - name: web
+          image: defect-web:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: INFERENCE_URL
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: INFERENCE_URL}
+            - name: STORAGE_URL
+              valueFrom:
+                configMapKeyRef: {name: defect-config, key: STORAGE_URL}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 15
+          resources:
+            requests: {cpu: 75m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  namespace: defect-detection
+spec:
+  type: NodePort
+  selector: {app: web}
+  ports:
+    - port: 80
+      targetPort: 8000
+      nodePort: 30080

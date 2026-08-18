@@ -1,0 +1,7 @@
+.git
+__pycache__
+*.pyc
+.ipynb_checkpoints
+combined_dataset
+combined_dataset.zip
+data

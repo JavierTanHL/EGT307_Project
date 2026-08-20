@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Product Defect Inspection</title>
+  <title>Product Defect Inspection System</title>
   <style>
     :root { font-family: Arial, sans-serif; color: #17232c; background: #eef3f6; }
     * { box-sizing: border-box; }
@@ -14,6 +14,7 @@
     p { color: #647581; }
     main { display: grid; grid-template-columns: 1.2fr .8fr; gap: 20px; }
     .card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 8px 24px #17304418; }
+    .model-card { grid-column: 1 / -1; background: #eef7fb; border: 2px solid #0f6c8d; border-radius: 16px; padding: 18px 24px; }
     .history { grid-column: 1 / -1; }
     .camera { position: relative; background: #101820; border-radius: 12px; overflow: hidden; aspect-ratio: 4/3; }
     video { width: 100%; height: 100%; object-fit: cover; }
@@ -21,8 +22,6 @@
     .guide span { display: block; width: fit-content; margin: auto; padding: 6px 10px; background: #000b; color: white; }
     button { margin: 12px 8px 0 0; padding: 10px 15px; border: 0; border-radius: 9px; background: #126c86; color: white; font-weight: bold; cursor: pointer; }
     button:disabled { opacity: .45; cursor: not-allowed; }
-    label { display: block; font-weight: bold; margin-top: 4px; }
-    select { width: 100%; padding: 9px; border: 1px solid #dce4e8; border-radius: 8px; margin-top: 4px; margin-bottom: 8px; }
     .prediction { text-align: center; padding: 18px; border-radius: 12px; font-size: 2rem; font-weight: 900; }
     .good { background: #dff5e8; color: #16854c; }
     .bad { background: #fde5e5; color: #b62e31; }
@@ -33,6 +32,8 @@
     th, td { border-bottom: 1px solid #dce4e8; padding: 9px; text-align: left; }
     .message { min-height: 22px; color: #657682; }
     @media (max-width: 800px) { main { grid-template-columns: 1fr; } .history { grid-column: auto; } }
+    .dropzone { margin-top: 12px; padding: 22px; border: 2px dashed #9fb3bf; border-radius: 12px; text-align: center; color: #647581; cursor: pointer; transition: all .15s; }
+    .dropzone.dragover { border-color: #126c86; background: #e3f0f4; color: #126c86; }
   </style>
 </head>
 <body>
@@ -45,10 +46,29 @@
 </header>
 
 <main>
+  <!-- Dedicated AI Model Selection Menu -->
+  <section class="card model-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <div>
+        <h2 style="margin: 0 0 4px; color: #0f6c8d; font-size: 1.3rem;">🤖 AI Model Selection Menu</h2>
+        <p style="margin: 0; color: #4a6375; font-size: 0.92rem;">Choose which AI model to use for live product defect classification.</p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <label for="itemSelect" style="font-weight: bold; color: #0f6c8d;">Active Model:</label>
+        <select id="itemSelect" style="margin: 0; width: 200px; font-size: 1rem; padding: 10px; font-weight: bold; border: 2px solid #0f6c8d; border-radius: 8px; cursor: pointer; background: white;"></select>
+        <button id="refreshModels" type="button" style="margin: 0; padding: 10px 18px; font-size: 0.95rem; background: #0f6c8d; color: white; font-weight: bold; border: none; border-radius: 8px; cursor: pointer;">
+          🔄 Refresh Models
+        </button>
+        <button id="deleteModelBtn" type="button" style="margin: 0; padding: 10px 18px; font-size: 0.95rem; background: #b62e31; color: white; font-weight: bold; border: none; border-radius: 8px; cursor: pointer;">
+          🗑️ Delete Model
+        </button>
+      </div>
+    </div>
+    <div id="modelStatus" style="font-size: 0.88rem; color: #2c495d; margin-top: 10px; font-weight: 500;">Loading models…</div>
+  </section>
+
   <section class="card">
-    <h2>Webcam</h2>
-    <label for="itemSelect">Item to inspect</label>
-    <select id="itemSelect"></select>
+    <h2>Webcam & Image Input</h2>
     <div class="camera">
       <video id="video" autoplay playsinline muted></video>
       <div class="guide"><span>Centre product here</span></div>
@@ -57,6 +77,9 @@
     <button id="start">Start Camera</button>
     <button id="inspect" disabled>Capture & Inspect</button>
     <button id="stop" disabled>Stop</button>
+    <button id="upload">Upload Image</button>
+    <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+    <div id="dropzone" class="dropzone">Drag &amp; drop an image here, or click to choose</div>
     <p id="message" class="message"></p>
   </section>
 
@@ -77,7 +100,7 @@
 
   <section class="card history">
     <h2>Stored Inspection History</h2>
-    <button id="refresh">Refresh</button>
+    <button id="refresh">Refresh History</button>
     <p id="stats"></p>
     <table>
       <thead><tr><th>Time</th><th>Result</th><th>Confidence</th><th>Image</th></tr></thead>
@@ -92,9 +115,46 @@ const canvas = document.getElementById("canvas");
 const startBtn = document.getElementById("start");
 const inspectBtn = document.getElementById("inspect");
 const stopBtn = document.getElementById("stop");
+const historyBody = document.getElementById("history");
+const itemSelect = document.getElementById("itemSelect");
+const refreshModelsBtn = document.getElementById("refreshModels");
+const modelStatusEl = document.getElementById("modelStatus");
 let stream = null;
 
 const pct = value => `${(Number(value) * 100).toFixed(1)}%`;
+
+async function reloadAndRefreshModels() {
+  if (refreshModelsBtn) { refreshModelsBtn.disabled = true; refreshModelsBtn.textContent = "Loading…"; }
+  if (modelStatusEl) modelStatusEl.textContent = "Reloading models from disk…";
+  try {
+    const response = await fetch("/api/models/reload", { method: "POST" });
+    const data = await response.json();
+    const items = data.items && data.items.length ? data.items : ["component"];
+    const previous = itemSelect.value;
+    itemSelect.innerHTML = items.map(name => `<option value="${name}">${name}</option>`).join("");
+    if (items.includes(previous)) itemSelect.value = previous;
+    if (modelStatusEl) modelStatusEl.textContent = `Models refreshed! ${items.length} available: ${items.join(", ")}`;
+  } catch (error) {
+    if (modelStatusEl) modelStatusEl.textContent = `Error reloading models: ${error.message}`;
+  } finally {
+    if (refreshModelsBtn) { refreshModelsBtn.disabled = false; refreshModelsBtn.textContent = "🔄 Refresh Models"; }
+  }
+}
+
+async function loadItems() {
+  try {
+    const response = await fetch("/api/models");
+    const data = await response.json();
+    const items = data.items && data.items.length ? data.items : ["component"];
+    const previous = itemSelect.value;
+    itemSelect.innerHTML = items.map(name => `<option value="${name}">${name}</option>`).join("");
+    if (items.includes(previous)) itemSelect.value = previous;
+    if (modelStatusEl) modelStatusEl.textContent = `Active model: ${itemSelect.value || 'component'} (${items.length} available)`;
+  } catch {
+    itemSelect.innerHTML = '<option value="component">component</option>';
+    if (modelStatusEl) modelStatusEl.textContent = 'Active model: component';
+  }
+}
 
 async function startCamera() {
   try {
@@ -136,36 +196,50 @@ function capture() {
   });
 }
 
+async function runInspection(blob) {
+  preview.src = URL.createObjectURL(blob);
+  const form = new FormData();
+  form.append("file", blob, `capture-${Date.now()}.jpg`);
+  form.append("item", itemSelect.value || "component");
+  const response = await fetch("/api/inspect", { method: "POST", body: form });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.detail || "Inspection failed");
+
+  const prediction = payload.prediction;
+  label.textContent = prediction.prediction;
+  label.className = `prediction ${prediction.prediction === "BAD" ? "bad" : "good"}`;
+  confidence.textContent = pct(prediction.confidence);
+  goodProbability.textContent = pct(prediction.good_probability);
+  badProbability.textContent = pct(prediction.bad_probability);
+  empty.hidden = true;
+  result.hidden = false;
+  saved.textContent = payload.storage_saved
+    ? `Stored as inspection #${payload.storage_record.id}`
+    : `Prediction completed, but storage failed: ${payload.storage_error}`;
+  await loadData();
+}
+
 async function inspectFrame() {
   inspectBtn.disabled = true;
   inspectBtn.textContent = "Inspecting…";
   try {
     const blob = await capture();
-    preview.src = URL.createObjectURL(blob);
-    const form = new FormData();
-    form.append("file", blob, `capture-${Date.now()}.jpg`);
-    form.append("item", itemSelect.value || "component");
-    const response = await fetch("/api/inspect", { method: "POST", body: form });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "Inspection failed");
-
-    const prediction = payload.prediction;
-    label.textContent = prediction.prediction;
-    label.className = `prediction ${prediction.prediction === "BAD" ? "bad" : "good"}`;
-    confidence.textContent = pct(prediction.confidence);
-    goodProbability.textContent = pct(prediction.good_probability);
-    badProbability.textContent = pct(prediction.bad_probability);
-    empty.hidden = true;
-    result.hidden = false;
-    saved.textContent = payload.storage_saved
-      ? `Stored as inspection #${payload.storage_record.id}`
-      : `Prediction completed, but storage failed: ${payload.storage_error}`;
-    await loadData();
+    await runInspection(blob);
   } catch (error) {
     message.textContent = error.message;
   } finally {
     inspectBtn.disabled = !stream;
     inspectBtn.textContent = "Capture & Inspect";
+  }
+}
+
+async function inspectUpload(file) {
+  message.textContent = "Inspecting uploaded image…";
+  try {
+    await runInspection(file);
+    message.textContent = "Uploaded image inspected.";
+  } catch (error) {
+    message.textContent = error.message;
   }
 }
 
@@ -178,7 +252,7 @@ async function loadData() {
     const summary = await statsResponse.json();
 
     stats.textContent = `Total: ${summary.total} | Good: ${summary.good} | Bad: ${summary.bad} | Average confidence: ${pct(summary.average_confidence)}`;
-    history.innerHTML = items.length ? "" : '<tr><td colspan="4">No records yet.</td></tr>';
+    historyBody.innerHTML = items.length ? "" : '<tr><td colspan="4">No records yet.</td></tr>';
 
     for (const item of items) {
       const row = document.createElement("tr");
@@ -186,23 +260,10 @@ async function loadData() {
         ? `<a target="_blank" href="/api/inspections/${item.id}/image">View</a>`
         : "—";
       row.innerHTML = `<td>${new Date(item.created_at).toLocaleString()}</td><td>${item.prediction}</td><td>${pct(item.confidence)}</td><td>${link}</td>`;
-      history.appendChild(row);
+      historyBody.appendChild(row);
     }
   } catch (error) {
-    history.innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`;
-  }
-}
-
-async function loadItems() {
-  try {
-    const response = await fetch("/api/models");
-    const data = await response.json();
-    const items = data.items && data.items.length ? data.items : ["component"];
-    const previous = itemSelect.value;
-    itemSelect.innerHTML = items.map(name => `<option value="${name}">${name}</option>`).join("");
-    if (items.includes(previous)) itemSelect.value = previous;
-  } catch {
-    itemSelect.innerHTML = '<option value="component">component</option>';
+    historyBody.innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`;
   }
 }
 
@@ -211,7 +272,7 @@ async function checkHealth() {
     const response = await fetch("/health");
     const value = await response.json();
     const loadedItems = value.dependencies?.inference?.details?.models_loaded || [];
-    health.textContent = loadedItems.length ? `Services ready (${loadedItems.length} item type${loadedItems.length === 1 ? "" : "s"})` : "No trained models loaded";
+    health.textContent = loadedItems.length ? `Services ready (${loadedItems.length} model${loadedItems.length === 1 ? "" : "s"})` : "No trained models loaded";
   } catch {
     health.textContent = "Services unavailable";
   }
@@ -220,6 +281,58 @@ async function checkHealth() {
 startBtn.onclick = startCamera;
 stopBtn.onclick = stopCamera;
 inspectBtn.onclick = inspectFrame;
+upload.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  if (fileInput.files[0]) inspectUpload(fileInput.files[0]);
+  fileInput.value = "";
+};
+dropzone.onclick = () => fileInput.click();
+dropzone.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  dropzone.classList.add("dragover");
+});
+dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+dropzone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dropzone.classList.remove("dragover");
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    message.textContent = "Please drop a JPG, PNG, or WebP image.";
+    return;
+  }
+  inspectUpload(file);
+});
+
+const deleteModelBtn = document.getElementById("deleteModelBtn");
+if (deleteModelBtn) {
+  deleteModelBtn.onclick = async () => {
+    const selectedModel = itemSelect.value;
+    if (!selectedModel) {
+      alert("No model selected.");
+      return;
+    }
+    if (!confirm(`Are you sure you want to delete the model "${selectedModel}" from persistent storage?\n\nThis will permanently delete the model.`)) {
+      return;
+    }
+    try {
+      if (modelStatusEl) modelStatusEl.textContent = `Deleting model "${selectedModel}"...`;
+      const response = await fetch(`/api/models/${encodeURIComponent(selectedModel)}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Failed to delete model");
+      if (modelStatusEl) modelStatusEl.textContent = `Model "${selectedModel}" deleted successfully.`;
+      await reloadAndRefreshModels();
+    } catch (err) {
+      if (modelStatusEl) modelStatusEl.textContent = `Error deleting model: ${err.message}`;
+      alert(`Error deleting model: ${err.message}`);
+    }
+  };
+}
+
+refreshModelsBtn.onclick = reloadAndRefreshModels;
+itemSelect.onchange = () => {
+  if (modelStatusEl) modelStatusEl.textContent = `Selected active model: ${itemSelect.value}`;
+};
 refresh.onclick = () => { loadData(); loadItems(); };
 window.addEventListener("beforeunload", stopCamera);
 window.addEventListener("DOMContentLoaded", async () => {

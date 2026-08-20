@@ -150,11 +150,40 @@ async function pollStatus() {
 }
 
 async function refreshModels() {
-  const response = await fetch('/api/models');
-  const data = await response.json();
-  modelsBody.innerHTML = data.models.length
-    ? data.models.map(name => `<tr><td>${name}</td><td><a href="/api/models/${encodeURIComponent(name)}/download">Download</a></td></tr>`).join('')
-    : '<tr><td colspan="2">No trained models yet.</td></tr>';
+  try {
+    const response = await fetch('/api/models');
+    const data = await response.json();
+    modelsBody.innerHTML = data.models.length
+      ? data.models.map(name => `<tr>
+          <td><strong>${name}</strong></td>
+          <td style="text-align: right;">
+            <a href="/api/models/${encodeURIComponent(name)}/download" style="margin-right: 12px; text-decoration: none; font-weight: bold; color: #126c86;">⬇️ Download</a>
+            <button onclick="deleteModel('${name}')" style="margin: 0; padding: 6px 12px; background: #b62e31; font-size: 0.85rem; border-radius: 6px;">🗑️ Delete</button>
+          </td>
+        </tr>`).join('')
+      : '<tr><td colspan="2">No trained models yet.</td></tr>';
+  } catch (err) {
+    modelsBody.innerHTML = `<tr><td colspan="2">Error loading models: ${err.message}</td></tr>`;
+  }
+}
+
+async function deleteModel(filename) {
+  if (!confirm(`Are you sure you want to delete "${filename}" from persistent storage?\n\nThis will permanently delete the model file.`)) {
+    return;
+  }
+  try {
+    const response = await fetch(`/api/models/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || 'Failed to delete model');
+    }
+    if (data.reload_ok === false) {
+      alert(`Model "${filename}" was deleted from storage, but inference service could not be reloaded: ${data.reload_error}`);
+    }
+    refreshModels();
+  } catch (err) {
+    alert(`Error deleting model: ${err.message}`);
+  }
 }
 document.getElementById('refreshModels').onclick = refreshModels;
 

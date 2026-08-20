@@ -86,6 +86,28 @@ async def reload_models() -> dict[str, Any]:
     return {"items": sorted(models.keys()), "load_errors": load_errors}
 
 
+@app.delete("/models/{filename}")
+async def delete_model_file(filename: str) -> dict[str, Any]:
+    if not filename.endswith(".keras") or "/" in filename or "\\" in filename or ".." in filename:
+        # Also support item name instead of exact filename
+        target_file = f"{filename}_classifier.keras" if not filename.endswith(".keras") else filename
+    else:
+        target_file = filename
+
+    model_path = MODELS_DIR / target_file
+    if not model_path.exists():
+        raise HTTPException(status_code=404, detail=f"Model file '{target_file}' not found.")
+
+    try:
+        model_path.unlink()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete model file: {exc}")
+
+    load_models()
+    return {"deleted": True, "filename": target_file, "items": sorted(models.keys())}
+
+
+
 @app.post("/predict")
 async def predict(file: UploadFile = File(...), item: str = Form(DEFAULT_ITEM)) -> dict[str, Any]:
     model = models.get(item)

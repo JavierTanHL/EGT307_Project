@@ -106,6 +106,39 @@ async def download_model(filename: str) -> FileResponse:
     return FileResponse(model_path, filename=filename)
 
 
+@app.delete("/api/models/{filename}")
+async def delete_model(filename: str) -> dict[str, Any]:
+    if not filename.endswith(".keras") or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid model filename.")
+
+    model_path = MODELS_DIR / filename
+    if not model_path.exists():
+        raise HTTPException(status_code=404, detail="Model not found.")
+
+    try:
+        model_path.unlink()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete model: {exc}")
+
+    reload_ok = True
+    reload_error = None
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.post(f"{INFERENCE_URL}/models/reload")
+            res.raise_for_status()
+    except Exception as exc:
+        reload_ok = False
+        reload_error = str(exc)
+
+    return {
+        "deleted": True,
+        "filename": filename,
+        "reload_ok": reload_ok,
+        "reload_error": reload_error,
+    }
+
+
+
 class ProgressCallback(tf.keras.callbacks.Callback):
     def __init__(self, epoch_offset: int) -> None:
         super().__init__()
@@ -121,16 +154,29 @@ def run_training(item_name: str) -> None:
     try:
         data_dir = DATA_DIR / item_name
 
-        train_ds = tf.keras.utils.image_dataset_from_directory(
-            data_dir, validation_split=0.2, subset="training", seed=42,
-            image_size=IMAGE_SIZE, batch_size=32
-        )
-        val_ds = tf.keras.utils.image_dataset_from_directory(
-            data_dir, validation_split=0.2, subset="validation", seed=42,
-            image_size=IMAGE_SIZE, batch_size=32
-        )
+        good_count = len(list((data_dir / "good").glob("*"))) if (data_dir / "good").exists() else 0
+        bad_count = len(list((data_dir / "bad").glob("*"))) if (data_dir / "bad").exists() else 0
 
-        labels = np.concatenate([y.numpy() for _, y in train_ds])
+        if good_count >= 5 and bad_count >= 5:
+            raw_train_ds = tf.keras.utils.image_dataset_from_directory(
+                data_dir, validation_split=0.2, subset="training", seed=42,
+                image_size=IMAGE_SIZE, batch_size=32
+            )
+            raw_val_ds = tf.keras.utils.image_dataset_from_directory(
+                data_dir, validation_split=0.2, subset="validation", seed=42,
+                image_size=IMAGE_SIZE, batch_size=32
+            )
+        else:
+            raw_train_ds = tf.keras.utils.image_dataset_from_directory(
+                data_dir, seed=42,
+                image_size=IMAGE_SIZE, batch_size=32
+            )
+            raw_val_ds = tf.keras.utils.image_dataset_from_directory(
+                data_dir, seed=42,
+                image_size=IMAGE_SIZE, batch_size=32
+            )
+
+        labels = np.concatenate([y.numpy() for _, y in raw_train_ds])
         counts = np.bincount(labels, minlength=2)
         total = counts.sum()
         class_weight = {0: total / (2 * max(counts[0], 1)), 1: total / (2 * max(counts[1], 1))}
@@ -142,9 +188,9 @@ def run_training(item_name: str) -> None:
             tf.keras.layers.RandomZoom(0.15),
             tf.keras.layers.RandomContrast(0.1),
         ])
-        train_ds = train_ds.map(lambda x, y: (data_augmentation(x, training=True), y), num_parallel_calls=AUTOTUNE)
+        train_ds = raw_train_ds.map(lambda x, y: (data_augmentation(x, training=True), y), num_parallel_calls=AUTOTUNE)
         train_ds = train_ds.cache().shuffle(1000).prefetch(AUTOTUNE)
-        val_ds = val_ds.cache().prefetch(AUTOTUNE)
+        val_ds = raw_val_ds.cache().prefetch(AUTOTUNE)
 
         base_model = tf.keras.applications.MobileNetV2(input_shape=IMAGE_SIZE + (3,), include_top=False, weights="imagenet")
         base_model.trainable = False

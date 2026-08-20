@@ -55,6 +55,29 @@ async def models() -> Any:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@app.post("/api/models/reload")
+async def reload_models() -> Any:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            response = await client.post(f"{INFERENCE_URL}/models/reload")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.delete("/api/models/{filename}")
+async def delete_model(filename: str) -> Any:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            response = await client.delete(f"{INFERENCE_URL}/models/{filename}")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+
 @app.post("/api/inspect")
 async def inspect(file: UploadFile = File(...), item: str = Form("component")) -> dict[str, Any]:
     image_bytes = await file.read()

@@ -9,10 +9,10 @@ first model exists.
 
 | Service       | Port | Role                                                                 |
 |---------------|------|-----------------------------------------------------------------------|
-| **Web/API**   | 8000 | Serves the site, requests webcam access, calls Inference, then Storage. |
-| **Inference** | 8001 | Loads every `\\\*.keras` model in `models/`, runs prediction, returns `GOOD`/`BAD` + confidence. |
-| **Storage**   | 8002 | Saves inspection records + images in SQLite, serves history and stats. |
-| **Trainer**   | 8003 | Web UI to upload good/bad images per item and fine-tune a new classifier. |
+| **Web/API** (Javier)  | 8000 | Serves the site, requests webcam access, calls Inference, then Storage. |
+| **Inference** (Azmi) | 8001 | Loads every `\\\*.keras` model in `models/`, runs prediction, returns `GOOD`/`BAD` + confidence. |
+| **Storage** (Harsidh)  | 8002 | Saves inspection records + images in SQLite, serves history and stats. |
+| **Trainer** (Darrel)  | 8003 | Web UI to upload good/bad images per item and fine-tune a new classifier. |
 
 1. **Web/API Service**
    - Serves the website and requests webcam permission in the browser.
